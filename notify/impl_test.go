@@ -312,3 +312,12 @@ func TestWechat(t *testing.T) {
 	require.False(t, retry)
 	require.Error(t, err)
 }
+
+func TestDingTalkRetry(t *testing.T) {
+	notifier := new(DingTalk)
+	retryCodes := append(defaultRetryCodes(), http.StatusTooManyRequests)
+	for statusCode, expected := range retryTests(retryCodes) {
+		actual, _ := notifier.retry(statusCode)
+		require.Equal(t, expected, actual, fmt.Sprintf("error on status %d", statusCode))
+	}
+}

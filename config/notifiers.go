@@ -75,6 +75,23 @@ var (
 		Footer:    `{{ template "slack.default.footer" . }}`,
 	}
 
+	// DefaultDingTalkConfig defines default values for DingTalk configurations.
+	DefaultDingTalkConfig = DingTalkConfig{
+		NotifierConfig: NotifierConfig{
+			VSendResolved: false,
+		},
+		MsgType: "markdown",
+		Text: map[string]string{
+			"content": `{{ template "dingtalk.default.text_content" . }}`,
+		},
+		Markdown: map[string]string{
+			"title": `{{ template "dingtalk.default.mrkdwn_title" . }}`,
+			"text":  `{{ template "dingtalk.default.mrkdwn_text" . }}`,
+		},
+		AtMobiles: []string{},
+		IsAtAll:   false,
+	}
+
 	// DefaultHipchatConfig defines default values for Hipchat configurations.
 	DefaultHipchatConfig = HipchatConfig{
 		NotifierConfig: NotifierConfig{
@@ -250,6 +267,28 @@ type SlackConfig struct {
 func (c *SlackConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	*c = DefaultSlackConfig
 	type plain SlackConfig
+	return unmarshal((*plain)(c))
+}
+
+// DingTalkConfig configures notifications via Dingtalk.
+type DingTalkConfig struct {
+	NotifierConfig `yaml:",inline" json:",inline"`
+
+	HTTPConfig *commoncfg.HTTPClientConfig `yaml:"http_config,omitempty" json:"http_config,omitempty"`
+
+	APIURL Secret `yaml:"api_url,omitempty" json:"api_url,omitempty"`
+
+	MsgType   string            `yaml:"msg_type,omitempty" json:"msg_type,omitempty"`
+	Text      map[string]string `yaml:"text,omitempty" json:"text,omitempty"`
+	Markdown  map[string]string `yaml:"markdown,omitempty" json:"markdown,omitempty"`
+	AtMobiles []string          `yaml:"at_mobiles,omitempty" json:"at_mobiles,omitempty"`
+	IsAtAll   bool              `yaml:"is_at_all,omitempty" json:"is_at_all,omitempty"`
+}
+
+// UnmarshalYAML implements the yaml.Unmarshaler interface.
+func (c *DingTalkConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	*c = DefaultDingTalkConfig
+	type plain DingTalkConfig
 	return unmarshal((*plain)(c))
 }
 
