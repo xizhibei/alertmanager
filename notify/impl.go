@@ -126,6 +126,10 @@ func BuildReceiverIntegrations(nc *config.Receiver, tmpl *template.Template, log
 		n := NewSlack(c, tmpl, logger)
 		add("slack", i, n, c)
 	}
+	for i, c := range nc.DingTalkConfigs {
+		n := NewDingTalk(c, tmpl, logger)
+		add("dingtalk", i, n, c)
+	}
 	for i, c := range nc.HipchatConfigs {
 		n := NewHipchat(c, tmpl, logger)
 		add("hipchat", i, n, c)
@@ -726,6 +730,113 @@ func (n *Slack) retry(statusCode int) (bool, error) {
 	// https://api.slack.com/changelog/2016-05-17-changes-to-errors-for-incoming-webhooks
 	if statusCode/100 != 2 {
 		return (statusCode/100 == 5), fmt.Errorf("unexpected status code %v", statusCode)
+	}
+
+	return false, nil
+}
+
+// DingTalk implements a Notifier for DingTalk notifications.
+// Doc from https://open-doc.dingtalk.com/docs/doc.htm?treeId=257&articleId=105735&docType=1#s5
+type DingTalk struct {
+	conf   *config.DingTalkConfig
+	tmpl   *template.Template
+	logger log.Logger
+}
+
+// NewDingTalk returns a new DingTalk notification handler.
+func NewDingTalk(c *config.DingTalkConfig, t *template.Template, l log.Logger) *DingTalk {
+	return &DingTalk{
+		conf:   c,
+		tmpl:   t,
+		logger: l,
+	}
+}
+
+type dingtalkReqTextContent struct {
+	Content string `json:"content,omitempty"`
+}
+
+type dingtalkReqMarkdownContent struct {
+	Title string `json:"title,omitempty"`
+	Text  string `json:"text,omitempty"`
+}
+
+type dingtalkReqAt struct {
+	AtMobiles []string `json:"atMobiles"`
+	IsAtAll   bool     `json:"isAtAll"`
+}
+
+type dingtalkReq struct {
+	MsgType  string                     `json:"msgtype"`
+	Text     dingtalkReqTextContent     `json:"text,omitempty"`
+	Markdown dingtalkReqMarkdownContent `json:"markdown,omitempty"`
+	At       dingtalkReqAt              `json:"at"`
+}
+
+// Notify implements the Notifier interface.
+func (n *DingTalk) Notify(ctx context.Context, as ...*types.Alert) (bool, error) {
+	var err error
+	var (
+		data     = n.tmpl.Data(receiverName(ctx, n.logger), groupLabels(ctx, n.logger), as...)
+		tmplText = tmplText(n.tmpl, data, &err)
+		url      = n.conf.APIURL
+	)
+
+	req := &dingtalkReq{
+		MsgType: n.conf.MsgType,
+		At: dingtalkReqAt{
+			AtMobiles: n.conf.AtMobiles,
+			IsAtAll:   n.conf.IsAtAll,
+		},
+	}
+
+	if n.conf.MsgType == "markdown" {
+		// If the atMobiles is not empty, the text must contains them
+		var buffer bytes.Buffer
+		for _, v := range n.conf.AtMobiles {
+			buffer.WriteString("@")
+			buffer.WriteString(v)
+			buffer.WriteString("\n")
+		}
+		req.Markdown = dingtalkReqMarkdownContent{
+			Title: tmplText(n.conf.Markdown["title"]),
+			Text:  buffer.String() + tmplText(n.conf.Markdown["text"]),
+		}
+	} else {
+		req.Text = dingtalkReqTextContent{
+			Content: tmplText(n.conf.Text["content"]),
+		}
+	}
+
+	if err != nil {
+		return false, err
+	}
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(req); err != nil {
+		return false, err
+	}
+
+	c, err := commoncfg.NewHTTPClientFromConfig(n.conf.HTTPConfig)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := ctxhttp.Post(ctx, c, string(url), contentTypeJSON, &buf)
+	if err != nil {
+		return true, err
+	}
+
+	defer resp.Body.Close()
+
+	return n.retry(resp.StatusCode)
+}
+
+func (n *DingTalk) retry(statusCode int) (bool, error) {
+	// Response codes 429 (rate limiting) and 5xx can potentially recover. 2xx
+	// responce codes indicate successful requests.
+	if statusCode/100 != 2 {
+		return (statusCode == 429 || statusCode/100 == 5), fmt.Errorf("unexpected status code %v", statusCode)
 	}
 
 	return false, nil
